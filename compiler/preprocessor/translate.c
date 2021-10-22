@@ -6,6 +6,7 @@
 #include <assert.h>
 
 #include "../common/environment.h"
+#include "../common/ucn.h"
 #include "translate.h"
 
 // convert crlf to lf, make sure there is newline at end of file
@@ -137,6 +138,27 @@ error:
     return 1;
 }
 
+static inline unsigned int hex_val(int c) {
+    if (isdigit(c))
+        return c - '0';
+    switch (tolower(c)) {
+    case 'a':
+        return 10;
+    case 'b':
+        return 11;
+    case 'c':
+        return 12;
+    case 'd':
+        return 13;
+    case 'e':
+        return 14;
+    case 'f':
+        return 15;
+    default:
+        assert(false);
+    }
+}
+
 // creates linked list of preprocessing tokens
 int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
     struct pp_token **tail = &pp_tokens->head;
@@ -149,6 +171,8 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
     int include_directive = 1;
     char include_term;
     int escape_sequence;
+    int ucn = 0;
+    unsigned long ucn_val;
     rewind(src);
     *tail = NULL;
     if (fgetpos(src, &pos))
@@ -166,7 +190,6 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
                 type = __WHITESPACE;
             else if (isdigit(c))
                 type = PP_TOKEN__PP_NUMBER;
-            // TODO support universal character names
             else if (isalpha(c) || c == '_')
                 type = PP_TOKEN__IDENTIFIER;
             else switch (c) {
@@ -218,11 +241,73 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
                     escape_sequence = 0;
                 }
                 break;
-            case '\\':
-                // TODO support universal character names
+            case '\\': // may be universal character name
+                ucn = 1;
+                ucn_val = 0;
+                break;
             default:
                 type = PP_TOKEN__OTHER;
                 term = true;
+            }
+        } else if (ucn == 1) {
+            if (c == 'u')
+                ucn = 2;
+            else if (c == 'U')
+                ucn = 6;
+            else { // '\'
+                ucn = 0;
+                term = true;
+                if (type)
+                    seek = -2;
+                else {
+                    assert(i == 1);
+                    type = PP_TOKEN__OTHER;
+                    seek = -1;
+                }
+            }
+        } else if (ucn != 0) {
+            if (isxdigit(c)) {
+                ucn_val *= 16;
+                ucn_val += hex_val(c);
+                if (ucn == 5 || ucn == 13) {
+                    // universal character name
+                    ucn = 0;
+                    if (!is_ucn_valid(ucn_val))
+                        goto error;
+                    switch (type) {
+                    case PP_TOKEN__CHARACTER_CONSTANT:
+                    case PP_TOKEN__STRING_LITERAL:
+                        break;
+                    case PP_TOKEN__PP_NUMBER:
+                    case PP_TOKEN__IDENTIFIER:
+                        if (!is_ucn_valid_identifier(ucn_val))
+                            goto error;
+                        break;
+                    case 0:
+                        // initial ucn in identifier
+                        if (!is_ucn_valid_identifier_initial(ucn_val))
+                            goto error;
+                        type = PP_TOKEN__IDENTIFIER;
+                        break;
+                    default:
+                        assert(false);
+                    }
+                } else
+                    ucn++;
+            } else { // '\'
+                if (type == PP_TOKEN__CHARACTER_CONSTANT || type == PP_TOKEN__STRING_LITERAL)
+                    goto error;
+                term = true;
+                if (ucn >= 6)
+                    ucn -= 4;
+                if (type)
+                    seek = -ucn - 1;
+                else {
+                    assert(i == ucn);
+                    type = PP_TOKEN__OTHER;
+                    seek = -ucn;
+                }
+                ucn = 0;
             }
         } else if (type == __WHITESPACE) {
             if (c == '\n' || !isspace(c)) {
@@ -238,8 +323,10 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
             if (c == '/' && c1 == '*') // */
                 term = true;
         } else if (type == PP_TOKEN__PP_NUMBER) {
-            // TODO support universal character names
-            if (!(isalnum(c) || c == '.' || c == '_' ||
+            if (c == '\\') { // may be universal character name
+                ucn = 1;
+                ucn_val = 0;
+            } else if (!(isalnum(c) || c == '.' || c == '_' ||
                 ((c == '+' || c == '-') && (c1 == 'e' || c1 == 'E' || c1 == 'p' || c1 == 'P')))) {
                 term = true;
                 seek = -1;
@@ -252,8 +339,10 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
             } else if (w && c == '"') {
                 type = PP_TOKEN__STRING_LITERAL;
                 escape_sequence = 0;
+            } else if (c == '\\') { // may be universal character name
+                ucn = 1;
+                ucn_val = 0;
             } else if (!(isalnum(c) || c == '_')) {
-                // TODO support universal character names
                 term = true;
                 seek = -1;
             }
@@ -314,7 +403,16 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
                 case 'x':
                     escape_sequence = 5;
                     break;
-                // TODO support universal character names
+                case 'u': // universal character name
+                    escape_sequence = 0;
+                    ucn = 2;
+                    ucn_val = 0;
+                    break;
+                case 'U': // universal character name
+                    escape_sequence = 0;
+                    ucn = 6;
+                    ucn_val = 0;
+                    break;
                 default:
                     goto error;
                 }
@@ -462,6 +560,7 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
             goto error;
         if (term) {
             char include[7];
+            assert(!ucn);
             switch (type) {
             __NEWLINE:
                 include_directive = 1;
