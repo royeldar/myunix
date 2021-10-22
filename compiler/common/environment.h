@@ -1,0 +1,6 @@
+#ifndef __ENVIRONMENT_H__
+#define __ENVIRONMENT_H__
+
+#define ___LOGICAL_SOURCE_LINE_MAXLEN 4095
+
+#endif // __ENVIRONMENT_H__
