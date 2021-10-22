@@ -289,7 +289,6 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
             switch (escape_sequence) {
             case 0:
             case 4:
-                escape_sequence = 0;
                 if (c == quote)
                     term = true;
                 else if (c == '\\')
@@ -492,6 +491,8 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
                 include_directive = 0;
             }
             *tail = malloc(sizeof(struct pp_token));
+            if (!*tail)
+                goto error;
             (*tail)->pos = pos;
             (*tail)->len = i + 1;
             (*tail)->type = type;
