@@ -19,8 +19,7 @@ enum pp_token_type {
 
 struct pp_token {
     struct pp_token *next;
-    fpos_t pos;
-    size_t len;
+    unsigned long pos, len;
     enum pp_token_type type;
 };
 

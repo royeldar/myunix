@@ -162,7 +162,7 @@ static inline unsigned int hex_val(int c) {
 // creates linked list of preprocessing tokens
 int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
     struct pp_token **tail = &pp_tokens->head;
-    fpos_t pos;
+    long pos = 0, pos1;
     long i = 0, j;
     enum pp_token_type type;
     bool term = true;
@@ -175,8 +175,6 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
     unsigned long ucn_val;
     rewind(src);
     *tail = NULL;
-    if (fgetpos(src, &pos))
-        goto error;
     while ((c = fgetc(src)) != EOF) {
         if (i == 0) {
             term = false;
@@ -366,7 +364,7 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
                 term = true;
                 seek = -j - 1;
             } else if (include_directive == 0) {
-                if (fsetpos(src, &pos))
+                if (fseek(src, pos, SEEK_SET))
                     goto error;
                 i = 0;
                 continue;
@@ -592,13 +590,16 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
             *tail = malloc(sizeof(struct pp_token));
             if (!*tail)
                 goto error;
+            (*tail)->next = NULL;
             (*tail)->pos = pos;
             (*tail)->len = i + 1;
             (*tail)->type = type;
             tail = &((*tail)->next);
+            pos1 = pos + i + 1;
             i = 0;
-            if (fgetpos(src, &pos))
+            if ((pos = ftell(src)) == -1)
                 goto error;
+            assert(pos == pos1);
             continue;
         }
         i++;
