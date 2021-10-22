@@ -508,7 +508,10 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
     if (ferror(src))
         goto error;
 
-    assert(term);
+    if (!term) {
+        assert(type == __COMMENT_OLD_STYLE);
+        goto error;
+    }
 
     return 0;
 error:
