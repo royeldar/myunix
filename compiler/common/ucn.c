@@ -210,7 +210,6 @@ static const struct range ucn_letter_ranges[] = {
     // Latin
     {0x1E00, 0x1E9B},
     {0x1EA0, 0x1EF9},
-    {0x207F, 0x207F},
     // Greek
     {0x1F00, 0x1F15},
     {0x1F18, 0x1F1D},
@@ -230,6 +229,8 @@ static const struct range ucn_letter_ranges[] = {
     {0x1FE0, 0x1FEC},
     {0x1FF2, 0x1FF4},
     {0x1FF6, 0x1FFC},
+    // Latin
+    {0x207F, 0x207F},
     // Hiragana
     {0x3041, 0x3093},
     {0x309B, 0x309C},
