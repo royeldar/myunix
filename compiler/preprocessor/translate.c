@@ -566,7 +566,7 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
             case __WHITESPACE:
                 break;
             case PP_TOKEN__PUNCTUATOR:
-                if (include_directive == 1 && i == 0 && c == '#')
+                if (include_directive == 1 && i == 0 && c1 == '#')
                     include_directive = 2;
                 else
                     include_directive = 0;
