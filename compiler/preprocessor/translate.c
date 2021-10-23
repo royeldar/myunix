@@ -560,18 +560,18 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
             char include[7];
             assert(!ucn);
             switch (type) {
-            __NEWLINE:
+            case __NEWLINE:
                 include_directive = 1;
                 break;
-            __WHITESPACE:
+            case __WHITESPACE:
                 break;
-            PP_TOKEN__PUNCTUATOR:
+            case PP_TOKEN__PUNCTUATOR:
                 if (include_directive == 1 && i == 0 && c == '#')
                     include_directive = 2;
                 else
                     include_directive = 0;
                 break;
-            PP_TOKEN__IDENTIFIER:
+            case PP_TOKEN__IDENTIFIER:
                 if (include_directive == 2 && i == 6) { // strlen("include") == 7
                     if (fseek(src, -7, SEEK_CUR))
                         goto error;
