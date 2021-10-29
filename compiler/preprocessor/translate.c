@@ -613,6 +613,8 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
         goto error;
     }
 
+    assert(*tail == NULL || type == __NEWLINE);
+
     return 0;
 error:
     return 1;
