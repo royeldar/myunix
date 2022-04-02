@@ -305,7 +305,8 @@ static const struct range ucn_special_ranges[] = {
 };
 
 static inline bool in_range(unsigned long n, const struct range *ranges, size_t len) {
-    for (size_t i = 0; i < len; i++) {
+    size_t i;
+    for (i = 0; i < len; i++) {
         const struct range *range = &ranges[i];
         if (n < range->from)
             return false;

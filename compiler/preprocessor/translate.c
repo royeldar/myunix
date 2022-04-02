@@ -16,6 +16,8 @@ int sanitize_source(FILE *src, FILE *dest) {
     bool empty = true;
     rewind(src);
     while ((c = fgetc(src)) != EOF) {
+        if (c == '\0')
+            goto error;
         if (c == '\r')
             // ignore carriage return
             continue;
@@ -162,6 +164,7 @@ static inline unsigned int hex_val(int c) {
 // creates linked list of preprocessing tokens
 int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
     struct pp_token **tail = &pp_tokens->head;
+    struct pp_token *head;
     long pos = 0, pos1;
     long i = 0, j;
     enum pp_token_type type;
@@ -617,5 +620,11 @@ int pp_tokenize(FILE *src, struct pp_token_list *pp_tokens) {
 
     return 0;
 error:
+    head = pp_tokens->head;
+    while (head != NULL) {
+        struct pp_token *next = head->next;
+        free(head);
+        head = next;
+    }
     return 1;
 }
