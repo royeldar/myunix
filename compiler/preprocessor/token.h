@@ -25,4 +25,16 @@ struct pp_token_list {
     struct pp_token *head;
 };
 
+struct token {
+    struct token *next;
+    char *file;
+    unsigned long line;
+};
+
+struct token_list {
+    struct token *head;
+    char *date; // "Mmm dd yyyy"
+    char *time; // "hh:mm:ss"
+};
+
 #endif // __TOKEN_H__
