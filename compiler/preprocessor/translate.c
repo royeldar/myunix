@@ -102,14 +102,33 @@ error:
 }
 
 // do line splicing
-int splice_lines(FILE *src, FILE *dest) {
+int splice_lines(FILE *src, FILE *dest, unsigned long **pos, size_t *n) {
     static char line[___LOGICAL_SOURCE_LINE_MAXLEN + 1];
+    long j;
+    size_t count = 0;
+    int c, c1 = EOF;
+    // quick way to determine number of line splices
+    rewind(src);
+    while ((c = fgetc(src)) != EOF) {
+        if (c == '\n' && c1 == '\\')
+            count++;
+        c1 = c;
+    }
+    if (ferror(src))
+        goto error;
+    *n = count;
+    if (count != 0) {
+        *pos = malloc(count * sizeof(unsigned long));
+        if (*pos == NULL)
+            goto error;
+    }
+    count = 0;
     rewind(src);
     while (!feof(src)) {
-        size_t len = 0;
+        size_t i;
         bool is_splicing = false;
         line[0] = '\0';
-        for (size_t i = 0; i < sizeof(line);) {
+        for (i = 0; i < sizeof(line);) {
             char *s = fgets(line + i, sizeof(line) - i, src);
             if (ferror(src))
                 goto error;
@@ -128,15 +147,26 @@ int splice_lines(FILE *src, FILE *dest) {
                 // stop splicing lines
                 break;
             // delete backslash
+            if ((j = ftell(src)) == -1)
+                goto error;
+            assert(count < *n);
+            assert(j >= 2 * (count + 1));
+            j -= 2 * (count + 1);
+            (*pos)[count++] = j;
             i -= 1;
             is_splicing = true;
         }
         if (fputs(line, dest) == EOF)
             goto error;
     }
+    assert(count == *n);
 
     return 0;
 error:
+    if (*pos != NULL) {
+        free(*pos);
+        *pos = NULL;
+    }
     return 1;
 }
 
