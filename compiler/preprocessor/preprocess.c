@@ -104,18 +104,23 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
     enum pp_state state = PP_STATE__NONE;
     enum pp_directive directive = PP_DIRECTIVE__NONE;
     int directive_state = 0;
-    struct macro_entry macro;
+    struct macro_entry macro = {0};
     size_t j;
     unsigned long pos;
     struct pp_token **tail = NULL;
     unsigned long line = 1; // TODO
-    memset(&macro, 0, sizeof(macro));
+    unsigned int cond_nest_level = 0;
+    unsigned int cond_skip_nest_level = 0;
+    bool cond_skip = false;
+    bool cond_skip_force = false;
+    const struct pp_token *directive_pp_token = NULL;
+    bool ifdef_defined;
     if (_preprocess(filename, &src, &pp_tokens, &splice_pos, &splice_count))
         goto error;
     for (pp_token = pp_tokens.head; pp_token != NULL; pp_token = pp_token->next) {
         unsigned long i = 0;
         int c;
-        bool b;
+        bool do_skip;
         enum pp_token_type type = pp_token->type;
         if (type == __NEWLINE) {
             if (state == PP_STATE__DIRECTIVE) {
@@ -124,6 +129,8 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
                     // null directive
                     break;
                 case PP_DIRECTIVE__DEFINE:
+                    if (cond_skip)
+                        break;
                     // macro definition with non-empty replacement list
                     if (directive_state == MACRO_EXPECT_REPLACEMENT_LIST_CONTINUE) {
                         struct pp_token *iter;
@@ -175,14 +182,106 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
                             assert(false);
                         break;
                     }
+                    // none of the above
                     goto error;
                 case PP_DIRECTIVE__UNDEF:
+                    if (cond_skip)
+                        break;
+                    if (!directive_state)
+                        goto error;
+                    break;
+                case PP_DIRECTIVE__IF:
+                    cond_nest_level++;
+                    if (!directive_state)
+                        goto error;
+                    if (cond_skip)
+                        break;
+                    do_skip = false;
+                    // TODO evaluate condition - from directive_pp_token to pp_token
+                    if (do_skip) {
+                        cond_skip_nest_level = cond_nest_level;
+                        cond_skip = true;
+                        assert(!cond_skip_force);
+                    }
+                    break;
+                case PP_DIRECTIVE__IFDEF:
+                    cond_nest_level++;
+                    if (!directive_state)
+                        goto error;
+                    if (cond_skip)
+                        break;
+                    do_skip = !ifdef_defined;
+                    if (do_skip) {
+                        cond_skip_nest_level = cond_nest_level;
+                        cond_skip = true;
+                        assert(!cond_skip_force);
+                    }
+                    break;
+                case PP_DIRECTIVE__IFNDEF:
+                    cond_nest_level++;
+                    if (!directive_state)
+                        goto error;
+                    if (cond_skip)
+                        break;
+                    do_skip = ifdef_defined;
+                    if (do_skip) {
+                        cond_skip_nest_level = cond_nest_level;
+                        cond_skip = true;
+                        assert(!cond_skip_force);
+                    }
+                    break;
+                case PP_DIRECTIVE__ELIF:
+                    if (!directive_state)
+                        goto error;
+                    assert(cond_nest_level > 0);
+                    if (!cond_skip) {
+                        // we should skip until #endif
+                        cond_skip_nest_level = cond_nest_level;
+                        cond_skip = true;
+                        assert(!cond_skip_force);
+                        cond_skip_force = true;
+                    } else if (cond_nest_level != cond_skip_nest_level) {
+                        // #elif is nested, we should skip
+                        assert(cond_nest_level > cond_skip_nest_level);
+                    } else if (!cond_skip_force) {
+                        do_skip = false;
+                        // TODO evaluate condition - from directive_pp_token to pp_token
+                        if (!do_skip) {
+                            cond_skip = false;
+                        }
+                    }
+                    break;
+                case PP_DIRECTIVE__ELSE:
+                    assert(!directive_state);
+                    assert(cond_nest_level > 0);
+                    if (!cond_skip) {
+                        // we should skip until #endif
+                        cond_skip_nest_level = cond_nest_level;
+                        cond_skip = true;
+                        assert(!cond_skip_force);
+                        cond_skip_force = true;
+                    } else if (cond_nest_level != cond_skip_nest_level) {
+                        // #else is nested, we should skip
+                        assert(cond_nest_level > cond_skip_nest_level);
+                    } else if (!cond_skip_force) {
+                        // stop skipping
+                        cond_skip = false;
+                    }
+                    break;
+                case PP_DIRECTIVE__ENDIF:
+                    assert(!directive_state);
+                    assert(cond_nest_level > 0);
+                    cond_nest_level--;
+                    if (cond_skip && cond_nest_level < cond_skip_nest_level) {
+                        cond_skip = false;
+                        cond_skip_force = false;
+                    }
                     break;
                 default:
                     // TODO
                     ;
                 }
-                if (directive == PP_DIRECTIVE__DEFINE) {
+                if (!cond_skip && directive == PP_DIRECTIVE__DEFINE) {
                     struct macro_entry *duplicate;
                     struct macro_entry *entry_ptr;
                     macro_sanitize_replacement_list(&macro);
@@ -207,16 +306,6 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
             state = PP_STATE__NONE;
             continue;
         }
-        /*if (type == __NEWLINE) {
-            if (state == PP_STATE__DIRECTIVE) {
-                if (directive_state != 100)
-                    goto error;
-                
-            }
-            // TODO
-            // macro invocation is hard!
-            continue;
-        }*/
         if (state == PP_STATE__NONE) {
             switch (type) {
             case __WHITESPACE:
@@ -239,10 +328,11 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
             }
         } else if (state == PP_STATE__TEXT) {
             assert(type != PP_TOKEN__HEADER_NAME);
+            if (cond_skip)
+                continue;
         } else if (state == PP_STATE__DIRECTIVE) {
             bool whitespace = false;
             char *name = NULL;
-            // TODO if block is nothing - then every directive syntax ok..
             if (type == __WHITESPACE) {
                 if (fseek(src, pp_token->pos, SEEK_SET))
                     goto error;
@@ -264,7 +354,7 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
                 if (whitespace)
                     break;
                 if (type == PP_TOKEN__IDENTIFIER) {
-                    char identifier[8] = {0};
+                    char identifier[8] = {0}; // strlen("include") == 7
                     if (pp_token->len > sizeof(identifier) - 1) {
                         directive = PP_DIRECTIVE__NON_DIRECTIVE;
                         continue;
@@ -302,28 +392,54 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
                     directive = PP_DIRECTIVE__NON_DIRECTIVE;
                 directive_state = 0;
                 break;
+            case PP_DIRECTIVE__ELIF:
+                if (!cond_nest_level)
+                    goto error;
+                // fallthrough
             case PP_DIRECTIVE__IF:
-                // TODO
+                if (directive_state == 0) {
+                    if (whitespace)
+                        break;
+                    directive_state = 1;
+                    directive_pp_token = pp_token;
+                }
                 break;
             case PP_DIRECTIVE__IFDEF:
-                // TODO
-                break;
             case PP_DIRECTIVE__IFNDEF:
-                // TODO
-                break;
-            case PP_DIRECTIVE__ELIF:
-                // TODO
+                if (whitespace)
+                    break;
+                if (directive_state || type != PP_TOKEN__IDENTIFIER)
+                    goto error;
+                directive_state = 1;
+                name = malloc(pp_token->len + 1);
+                if (name == NULL)
+                    goto error;
+                if (fseek(src, pp_token->pos, SEEK_SET) == EOF ||
+                    fread(name, 1, pp_token->len, src) != pp_token->len) {
+                    free(name);
+                    goto error;
+                }
+                name[pp_token->len] = '\0';
+                ifdef_defined = macro_table_get(macro_table, name) != NULL;
+                free(name);
                 break;
             case PP_DIRECTIVE__ELSE:
-                // TODO
-                break;
+                // NOTE: we don't verify there are no extra #else/#elif before the closing #endif
+                // fallthrough
             case PP_DIRECTIVE__ENDIF:
-                // TODO
-                break;
+                if (!cond_nest_level)
+                    goto error;
+                if (whitespace)
+                    break;
+                goto error;
             case PP_DIRECTIVE__INCLUDE:
+                if (cond_skip)
+                    break;
                 // TODO
                 break;
             case PP_DIRECTIVE__DEFINE:
+                if (cond_skip)
+                    break;
                 switch (directive_state) {
                 case MACRO_EXPECT_IDENTIFIER:
                     // macro name
@@ -412,7 +528,7 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
                     macro.macro.function.params_num = j;
                     j = 0;
                     directive_state = MACRO_EXPECT_PARAMETER;
-                    pos = pp_token->pos;                    
+                    pos = pp_token->pos;
                     // fallthrough
                 case MACRO_EXPECT_PARAMETER:
                     // we ignore whitespace in parameter list
@@ -475,6 +591,8 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
                 }
                 break;
             case PP_DIRECTIVE__UNDEF:
+                if (cond_skip)
+                    break;
                 if (whitespace)
                     break;
                 if (directive_state || type != PP_TOKEN__IDENTIFIER)
@@ -497,15 +615,23 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
                 free(name);
                 break;
             case PP_DIRECTIVE__LINE:
+                if (cond_skip)
+                    break;
                 // TODO
                 break;
             case PP_DIRECTIVE__ERROR:
+                if (cond_skip)
+                    break;
                 // TODO
-                break;
+                goto error;
             case PP_DIRECTIVE__PRAGMA:
+                if (cond_skip)
+                    break;
                 // TODO
                 break;
             case PP_DIRECTIVE__NON_DIRECTIVE:
+                if (cond_skip)
+                    break;
                 // TODO - ignore..
                 break;
             default:
@@ -515,6 +641,9 @@ int preprocess_recursive(const char *filename, struct token_list *tokens, struct
             assert(false);
         }
     }
+
+    if (cond_nest_level)
+        goto error;
 
     goto cleanup;
 error:
